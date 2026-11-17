@@ -1,7 +1,7 @@
 // Choosing, validating and describing the tab a call works on.
 
 import { attach, sessionOf } from '../cdp';
-import { adopt, defaultTabOf, ownerLabel, ownerOf, withClaimLock } from './agents';
+import { adopt, assertNotHeld, defaultTabOf, ownerLabel, ownerOf, withClaimLock } from './agents';
 import { showAgentBar } from './overlay';
 import { checkAbort, sleep, ToolError, type ToolCtx } from './types';
 
@@ -16,18 +16,22 @@ export async function openAgentTab(agent: string, url = 'about:blank', windowId?
   return tab;
 }
 
+/** An existing tab the agent may use: refused while another agent holds it, adopted when nobody does. Call inside the claim lock. */
+export async function claimTab(agent: string, tabId: number, makeDefault: boolean): Promise<chrome.tabs.Tab> {
+  const tab = await getTab(tabId);
+  if (!tab) throw new ToolError(`Tab ${tabId} does not exist. Call browser_tabs with action "list".`);
+  assertNotHeld(agent, tabId);
+  if (makeDefault || ownerOf(tabId) !== agent) await adopt(agent, tab, makeDefault);
+  return tab;
+}
+
 /**
- * Picks the tab a call acts on: the one it names, else the agent's own default tab, else
- * the active tab when nobody else owns it, else a fresh tab.
+ * Picks the tab a call acts on: the one it names (unless another agent holds it), else the
+ * agent's own default tab, else the active tab when nobody holds it, else a fresh tab.
  */
 export async function resolveTab(agent: string, tabId?: number): Promise<chrome.tabs.Tab> {
   return withClaimLock(async () => {
-    if (tabId !== undefined) {
-      const tab = await getTab(tabId);
-      if (!tab) throw new ToolError(`Tab ${tabId} does not exist. Call browser_tabs with action "list".`);
-      if (ownerOf(tabId) === undefined) await adopt(agent, tab, defaultTabOf(agent) === undefined);
-      return tab;
-    }
+    if (tabId !== undefined) return claimTab(agent, tabId, defaultTabOf(agent) === undefined);
     const own = defaultTabOf(agent);
     const ownTab = own === undefined ? null : await getTab(own);
     if (ownTab) return ownTab;

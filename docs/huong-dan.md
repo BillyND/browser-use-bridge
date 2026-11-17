@@ -99,7 +99,15 @@ args = ["-y", "--package=https://chrome-mcp-agent.chrome-mcp-agent.workers.dev/h
 - `HELMSMAN_PROFILE`: `core` chỉ quảng bá 13 tool dùng nhiều nhất, mặc định `full`.
 - `HELMSMAN_EXTENSION_ID`: chỉ nhận kết nối từ đúng extension có id này (mặc định nhận mọi origin `chrome-extension://`).
 
-**Bảo mật và đánh đổi.** Server chỉ lắng nghe `127.0.0.1`, kiểm tra header `Host` (chặn DNS rebinding) và từ chối mọi WebSocket có `Origin` không phải `chrome-extension://…`, nên trang web không nối vào được. Không dùng token: bất kỳ extension Chrome nào khác trên máy cũng có origin `chrome-extension://` và có thể kết nối nếu giành được cổng trước extension này; tiến trình khác trên máy cũng gọi được qua `/peer`. Chấp nhận được với máy cá nhân; nếu cần chặt hơn, đặt `HELMSMAN_EXTENSION_ID`. Công tắc **Cho phép AI điều khiển** áp dụng cho cả hai chế độ. Lệnh gọi mang tên `local:<tên client>` (ví dụ `local:claude-code`) để phân biệt các agent.
+**Bảo mật và đánh đổi.** Server chỉ lắng nghe `127.0.0.1`, kiểm tra header `Host` (chặn DNS rebinding) và từ chối mọi WebSocket có `Origin` không phải `chrome-extension://…`, nên trang web không nối vào được. Không dùng token: bất kỳ extension Chrome nào khác trên máy cũng có origin `chrome-extension://` và có thể kết nối nếu giành được cổng trước extension này; tiến trình khác trên máy cũng gọi được qua `/peer`. Chấp nhận được với máy cá nhân; nếu cần chặt hơn, đặt `HELMSMAN_EXTENSION_ID`. Công tắc **Cho phép AI điều khiển** áp dụng cho cả hai chế độ. Mỗi tiến trình server là một agent riêng, mang id `local:<tên client>/<thư mục làm việc>#<mã tiến trình>` (ví dụ `local:claude-code/sbb-dev#1a2b3c4d`), nên hai phiên Claude Code dùng chung một cấu hình MCP, kể cả cùng thư mục, vẫn là hai agent.
+
+**Nhiều agent song song.**
+
+- **Tab và nhóm riêng.** Mỗi agent có tab mặc định riêng và nhóm tab Chrome riêng, mỗi nhóm một màu.
+- **Agent tự đặt tên nhóm** theo việc nó đang làm, bằng tham số `name` của `browser_tabs`, ví dụ "Checkout bug"; action `rename` đổi tên sau. Trước khi agent đặt tên, nhóm mang tên thư mục làm việc, ví dụ `sbb-dev`. Hai agent đang làm việc trùng tên thì nhóm sau thêm hậu tố, ví dụ `sbb-dev·2`.
+- **Không giành tab của nhau.** Tab mà một agent khác đang làm việc bị từ chối với mọi lệnh, kể cả `select`, `close` và đóng cửa sổ chứa tab đó. Agent được hướng dẫn mở tab riêng.
+- **Nhả tab sau 10 phút.** Agent không gọi lệnh nào trong 10 phút (thường là phiên đã đóng hoặc server đã khởi động lại) thì mất quyền giữ tab, và agent khác được nhận tab đó.
+- **Stop riêng từng agent.** Nút **Stop** trên trang chỉ dừng agent đang làm việc ở tab đó; các agent khác vẫn chạy. Điều khiển trong popup vẫn áp dụng cho tất cả.
 
 ## Tiết kiệm token, bí mật và quy trình đã lưu
 

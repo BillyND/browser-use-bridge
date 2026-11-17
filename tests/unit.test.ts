@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { macCommands, parseShortcut } from '../extension/src/background/keys';
 import { agentName } from '../extension/src/prompt-copy';
-import { agentLabel, GROUP_COLORS, pickColor } from '../extension/src/background/tools/agent-id';
+import { agentLabel, cleanName, GROUP_COLORS, LABEL_MAX, pickColor, uniqueLabel } from '../extension/src/background/tools/agent-id';
+import { localAgentId } from '../shared/local-agent-id';
 import { Scheduler } from '../extension/src/background/tools/scheduler';
 import { signDeviceToken, verifyDeviceToken } from '../worker/src/device-token';
 import { newCode, normalizeCode } from '../worker/src/pairing';
@@ -194,6 +195,25 @@ describe('scheduler', () => {
     expect(log).toEqual(['start running']);
   });
 
+  it('can drop only one owner\'s waiting tasks, leaving other agents queued', async () => {
+    const log: string[] = [];
+    const s = new Scheduler(6);
+    const running = controlled(log, 'running');
+    const pRunning = s.run('tab:1', running.task, 'a');
+    const pMine = s.run('tab:1', controlled(log, 'mine').task, 'a').catch((e: Error) => e.message);
+    const theirs = controlled(log, 'theirs');
+    const pTheirs = s.run('tab:1', theirs.task, 'b');
+    await tick();
+    expect(s.cancelPending(new Error('stopped'), 'a')).toBe(1);
+    expect(await pMine).toBe('stopped');
+    running.finish();
+    await tick();
+    theirs.finish();
+    await expect(pRunning).resolves.toBe('running');
+    await expect(pTheirs).resolves.toBe('theirs');
+    expect(log).toEqual(['start running', 'start theirs']);
+  });
+
   it('serializes a burst of tasks per lane while lanes overlap', async () => {
     const s = new Scheduler(6);
     const active = new Map<string, number>();
@@ -218,8 +238,43 @@ describe('agent identity', () => {
     expect(agentLabel('local:claude-code')).toBe('claude-code');
     expect(agentLabel('ChatGPT#9f8e7d6c')).toBe('ChatGPT');
     expect(agentLabel('default')).toBe('AI');
-    expect(agentLabel('a-very-long-agent-name-indeed')).toHaveLength(14);
+    expect(agentLabel('a-very-long-agent-name-indeed-and-more')).toHaveLength(LABEL_MAX);
     expect(agentLabel('  ')).toBe('agent');
+  });
+
+  it('labels a local agent by its working folder until it names itself', () => {
+    expect(agentLabel('local:claude-code/sbb-dev#1a2b3c4d')).toBe('sbb-dev');
+    expect(agentLabel('local:claude-ai#1a2b3c4d')).toBe('claude-ai');
+  });
+
+  it('gives each local server process its own id, carrying the project folder', () => {
+    const home = '/Users/me';
+    const a = localAgentId('claude-code', '/Users/me/work/sbb-dev', home, 'aaaa1111');
+    const b = localAgentId('claude-code', '/Users/me/work/sbb-dev', home, 'bbbb2222');
+    expect(a).toBe('local:claude-code/sbb-dev#aaaa1111');
+    expect(a).not.toBe(b);
+    // Separator characters in folder or client names cannot break the format.
+    expect(agentLabel(localAgentId('my client', '/x/feat#12 v2/', home, 'c'))).toBe('feat-12-v2');
+    // Apps started from the dock run in "/" or the home folder: labelled by the client instead.
+    expect(agentLabel(localAgentId('claude-ai', '/', home, 'd'))).toBe('claude-ai');
+    expect(agentLabel(localAgentId('claude-ai', '/Users/me/', home, 'e'))).toBe('claude-ai');
+  });
+
+  it('cleans names agents choose and keeps live group titles unique', () => {
+    expect(cleanName('  Checkout\n  bug ')).toBe('Checkout bug');
+    expect(cleanName('Fake·2')).toBe('Fake');
+    expect(cleanName(`${'z'.repeat(LABEL_MAX - 3)}·12345`)).not.toMatch(/·\d+$/); // no suffix faked by clipping
+    expect(cleanName('say "hi" <b>')).toBe('say hi b');
+    expect(cleanName('   ')).toBe('');
+    expect(cleanName(42)).toBe('');
+    expect(cleanName('x'.repeat(80))).toHaveLength(LABEL_MAX);
+    expect(uniqueLabel('sbb-dev', [])).toBe('sbb-dev');
+    expect(uniqueLabel('sbb-dev', ['sbb-dev'])).toBe('sbb-dev·2');
+    expect(uniqueLabel('sbb-dev', ['sbb-dev', 'sbb-dev·2'])).toBe('sbb-dev·3');
+    const long = 'y'.repeat(LABEL_MAX);
+    const second = uniqueLabel(long, [long]);
+    expect(second).toHaveLength(LABEL_MAX);
+    expect(second.endsWith('·2')).toBe(true);
   });
 
   it('gives an agent the same colour every time and avoids colours in use', () => {

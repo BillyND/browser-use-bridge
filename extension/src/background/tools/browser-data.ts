@@ -1,6 +1,6 @@
 // Browser-level data and windows (not tied to one page): downloads, cookies, history, windows.
 
-import { adopt, withClaimLock } from './agents';
+import { adopt, assertNotHeld, withClaimLock } from './agents';
 import { downloadUrl } from './downloads';
 import { pageHeader, resolveTab, waitForLoad } from './tab';
 import { freeTool, text, ToolError, type Args, type ToolCtx } from './types';
@@ -93,7 +93,14 @@ export const browserDataTools = {
     }
     if (action === 'close' || action === 'focus') {
       if (args.windowId === undefined) throw new ToolError(`windowId is required for "${action}".`);
-      if (action === 'close') await chrome.windows.remove(args.windowId);
+      if (action === 'close') {
+        // Closing a window closes its tabs, so it is refused while another agent works in one of them.
+        const tabs = await chrome.tabs.query({ windowId: args.windowId });
+        await withClaimLock(async () => {
+          tabs.forEach((t) => assertNotHeld(ctx.agent, t.id!));
+          await chrome.windows.remove(args.windowId);
+        });
+      }
       else await chrome.windows.update(args.windowId, { focused: true, drawAttention: false });
       return text(`${action === 'close' ? 'Closed' : 'Focused'} window ${args.windowId}.`);
     }

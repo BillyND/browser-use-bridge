@@ -4,6 +4,8 @@
 
 interface Job {
   lane: string;
+  /** Who queued the task, so one caller's queue can be dropped alone. */
+  owner?: string;
   task: () => Promise<unknown>;
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
@@ -16,16 +18,17 @@ export class Scheduler {
 
   constructor(readonly maxConcurrent = 6) {}
 
-  run<T>(lane: string, task: () => Promise<T>): Promise<T> {
+  run<T>(lane: string, task: () => Promise<T>, owner?: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      this.pending.push({ lane, task, resolve: resolve as (v: unknown) => void, reject });
+      this.pending.push({ lane, owner, task, resolve: resolve as (v: unknown) => void, reject });
       this.pump();
     });
   }
 
-  /** Rejects every task that has not started yet; running tasks are left to finish. */
-  cancelPending(reason: unknown): number {
-    const dropped = this.pending.splice(0);
+  /** Rejects every task that has not started yet (only `owner`'s when given); running tasks are left to finish. */
+  cancelPending(reason: unknown, owner?: string): number {
+    const dropped = owner === undefined ? this.pending.splice(0) : this.pending.filter((job) => job.owner === owner);
+    if (owner !== undefined) this.pending = this.pending.filter((job) => job.owner !== owner);
     for (const job of dropped) job.reject(reason);
     return dropped.length;
   }

@@ -4,7 +4,7 @@ Let ChatGPT, Claude, Cursor or any MCP client drive **your own Chrome**: your re
 
 - **Cloud (free):** one MCP URL for ChatGPT, served from Cloudflare Workers.
 - **Local:** an MCP server on your machine for Claude Desktop, Cursor, Claude Code, VS Code and Codex CLI. No account needed.
-- **Parallel:** several AI agents at once, each in its own Chrome tab group.
+- **Parallel:** several AI agents at once, each in its own Chrome tab group, named by the agent after its task. Agents cannot take each other's tabs.
 - **User-controlled:** full browser access, an audit log, secret masking and a visible Stop button.
 
 Tiếng Việt: [hướng dẫn 10 phút](docs/san-sang.md) · [tài liệu đầy đủ](docs/huong-dan.md)
@@ -64,7 +64,11 @@ Cloud and local can be used at the same time.
 How it works:
 - **Real input.** Clicks and typing go through the Chrome DevTools Protocol, so pages see trusted events. When Chrome misroutes input into nested cross-site frames, it falls back to DOM events inside that frame.
 - **Visible cursor.** An animated cursor glides to every target, and a Stop button stays on the page.
-- **Parallel and isolated.** Calls on different tabs run in parallel; calls on the same tab run in order. Each agent gets its own tab group.
+- **Parallel and isolated.** Calls on different tabs run in parallel; calls on the same tab run in order.
+  - **One agent per session.** Every local server process (each Claude Code, Codex or Cursor session) is its own agent, even when several share one MCP config and folder.
+  - **Self-named tab groups.** Each agent has its own tab group, titled with a name the agent picks for its task (`browser_tabs` `name`). Until it picks one, the group shows its working folder, with `·2` added when another agent already uses that title.
+  - **No tab stealing.** A tab another agent is working in is refused. An agent's tabs are released after 10 minutes without a call.
+  - **Per-agent Stop.** The on-page Stop button stops only the agent working in that tab.
 
 ## Safety
 

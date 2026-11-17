@@ -11,7 +11,7 @@ import { parseWorkflowDetail, parseWorkflowList, promptArguments, workflowInstru
 export type ToolCaller = (tool: string, args: Record<string, unknown>, timeoutMs: number, safeToRepeat: boolean) => Promise<CallResult>;
 
 export const INSTRUCTIONS = `Helmsman controls the user's own Google Chrome (their real tabs and logged-in accounts).
-Workflow: browser_tabs (list, or "new" for a tab of your own) -> browser_snapshot -> act with refs from the latest snapshot -> check the change summary each action returns -> browser_done when the task is finished.
+Workflow: browser_tabs with a name for your task (list, or "new" for a tab of your own) -> browser_snapshot -> act with refs from the latest snapshot -> check the change summary each action returns -> browser_done when the task is finished.
 - Work where the user can see it: they watch your cursor move and click. Do the task through the page's own UI (browser_click, browser_type, browser_fill_form, browser_select_option, browser_scroll, browser_navigate) rather than behind the scenes. Use browser_evaluate only to read data or when no UI path exists, never to click, fill or submit for you, and never to call a site's internal APIs.
 - When the task is done, or you stop to wait for the user, call browser_done once: it hides your cursor and bar and closes Chrome's debugging bar right away.
 - Be fast: one action per step and trust its returned summary instead of taking a new snapshot after every action; fill several fields with one browser_fill_form; use browser_find or a scoped snapshot (ref) to look up one thing instead of a full snapshot.
@@ -23,7 +23,8 @@ Workflow: browser_tabs (list, or "new" for a tab of your own) -> browser_snapsho
 - browser_workflow records what you do and replays it later (also offered as MCP prompts).
 - Writing code in a web editor (W3Schools, CodePen, GitHub, VS Code web…): always send complete, properly formatted code with consistent indentation, then read it back to check the formatting.
 Several tabs and several agents:
-- Several AI agents can use the same Chrome at once. Each has its own default tab and its own Chrome tab group (titled with the agent's name and a colour); never touch a tab another agent is using unless the user asked.
+- Several AI agents can use the same Chrome at once. Each has its own default tab and its own Chrome tab group with a colour of its own. Name your group on your first browser_tabs call with name: a few words for your task (e.g. "Checkout bug"); until then it shows your working folder or app name.
+- A tab another agent is working in is refused; open your own with browser_tabs "new" instead. An agent's tabs are released after 10 minutes without a call.
 - Calls that omit tabId act on your default tab. Pass tabId (from browser_tabs or a result's "Tab N" line) to work in a specific tab; browser_tabs "new" opens another tab of your own in the background.
 - Calls on different tabs run in parallel, so to go faster open several tabs and send independent calls at the same time; calls on the same tab run one after another in the order sent.
 - Every result says which tab it acted on. Tabs are not brought to the front: the page does not need to be visible for clicks, typing and screenshots to work.
