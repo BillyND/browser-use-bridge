@@ -35,12 +35,14 @@ import { sessionTools } from './session';
 import { snapshotTools } from './snapshot';
 import { tabsTools } from './tabs';
 import { resolveTab } from './tab';
-import { justStopped, PAUSED, STOPPED, text, ToolError, type Args, type ToolCtx, type ToolSpec } from './types';
+import { justStopped, PAUSED, STOPPED, text, ToolError, TrustedError, type Args, type ToolCtx, type ToolSpec } from './types';
 import { waitTools } from './wait';
 
 export { hideAgentBar, showAgentBar } from './overlay';
 
 const MAX_PARALLEL = 6;
+/** The extension gives up on a call this long before the relay does, so its own error text reaches the agent. */
+const DEADLINE_SLACK_MS = 2000;
 
 const TOOLS: Record<string, ToolSpec> = {
   ...tabsTools,
@@ -76,6 +78,31 @@ export interface ToolResult {
   audit: Pick<ActivityEntry, 'host' | 'outcome' | 'approval'>;
 }
 
+/** How long the relay waits for this call, and its cancel signal. */
+export interface CallLimits {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * One signal that fires when the relay cancels the call or its deadline passes. A call given up on
+ * frees its tab's queue and its slot even when a Chrome API under it never answers.
+ */
+function callSignal(tool: string, limits: CallLimits): { signal?: AbortSignal; clear: () => void } {
+  const signals = limits.signal ? [limits.signal] : [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (limits.timeoutMs) {
+    const deadline = new AbortController();
+    const seconds = Math.round(limits.timeoutMs / 1000);
+    timer = setTimeout(
+      () => deadline.abort(new TrustedError(`Chrome did not finish "${tool}" within ${seconds}s, so Helmsman gave up on it: the page may be frozen or showing a dialog. Take a snapshot (or browser_tabs "list") to see the current state.`)),
+      Math.max(1000, limits.timeoutMs - DEADLINE_SLACK_MS),
+    );
+    signals.push(deadline.signal);
+  }
+  return { signal: signals.length ? AbortSignal.any(signals) : undefined, clear: () => clearTimeout(timer) };
+}
+
 const failure = (message: string, audit: ToolResult['audit'] = {}): Executed => ({ content: text(message), isError: true, audit: { outcome: 'error', ...audit }, seal: false, notes: [] });
 
 /** Runs a tool call and applies what every result gets on the way out: secrets hidden, output budget enforced. */
@@ -84,8 +111,9 @@ export async function runTool(
   name: string,
   args: Record<string, unknown>,
   agent: string = DEFAULT_AGENT,
+  limits: CallLimits = {},
 ): Promise<ToolResult> {
-  const result = await execute(name, args, agent, true);
+  const result = await execute(name, args, agent, true, limits);
   // Redact and apply the output budget to the page content first, then seal it in the untrusted envelope so a truncated result still ends with its closing tag.
   const protectedContent = await protectContent(result.content, agent, args ?? {});
   return { content: result.seal ? seal(protectedContent, result.notes) : protectedContent, isError: result.isError, audit: result.audit };
@@ -102,6 +130,7 @@ async function execute(
   args: Record<string, unknown>,
   agent: string,
   record: boolean,
+  limits: CallLimits = {},
 ): Promise<Executed> {
   await pausedLoaded;
   if (state.paused) return failure(PAUSED);
@@ -113,7 +142,8 @@ async function execute(
   // agent's); the running ones notice at their next step.
   const everyone = state.abort.signal;
   const mine = agentSignal(agent);
-  const signal = AbortSignal.any([everyone, mine]);
+  const call = callSignal(name, limits);
+  const signal = AbortSignal.any(call.signal ? [everyone, mine, call.signal] : [everyone, mine]);
   const onStopAll = () => scheduler.cancelPending(new ToolError(STOPPED));
   const onStopMine = () => scheduler.cancelPending(new ToolError(STOPPED), agent);
   everyone.addEventListener('abort', onStopAll, { once: true });
@@ -138,13 +168,14 @@ async function execute(
       const result = await spec.run(input, ctx);
       recorded?.();
       return finish(ctx, name, result);
-    }, agent);
+    }, agent, call.signal);
     // Helmsman's own bookkeeping (secret names, the workflow list) is machine-read JSON, not page content.
     const own = name === 'browser_secrets_list' || (name === 'browser_workflow' && input.action !== 'run');
     return { content, audit: { outcome: 'ok', ...ctx.audit }, seal: !own, notes: ctx.notes };
   } catch (e) {
     return failure(failureText(e), ctx.audit);
   } finally {
+    call.clear();
     endCall();
     everyone.removeEventListener('abort', onStopAll);
     mine.removeEventListener('abort', onStopMine);

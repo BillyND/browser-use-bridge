@@ -43,6 +43,10 @@ customElements.define('custom-card',class extends HTMLElement{constructor(){supe
 r.innerHTML='<div><button id="sb">Nút trong shadow</button><span id="ss"></span></div>';
 r.getElementById('sb').onclick=()=>{r.getElementById('ss').textContent='Shadow OK'}}});
 </script></body></html>`,
+  // Asks "Leave site?" once the user (or an agent) has interacted with it, like an editor with unsaved changes.
+  '/leave.html': `<!doctype html><meta charset="utf-8"><title>Unsaved editor</title><body>
+<label>Ghi chú <input id="note"></label><button onclick="document.title='Edited'">Sửa</button>
+<script>addEventListener('beforeunload', e => { e.preventDefault(); e.returnValue = ''; });</script></body>`,
   '/same.html': `<!doctype html><meta charset="utf-8"><body><button onclick="this.nextElementSibling.textContent='Cùng nguồn OK'">Nút cùng nguồn</button><span></span></body>`,
   '/cross.html': `<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif">
 <h3>Form trong iframe</h3>

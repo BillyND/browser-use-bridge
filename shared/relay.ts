@@ -33,6 +33,8 @@ export interface RelayOptions<L extends RelayLink> {
   graceMs?: number;
   /** Wire format of a call on a given link; defaults to the extension protocol's `call` message. */
   encode?: (id: string, req: CallRequest, link: L) => string;
+  /** Wire format of "stop working on call `id`" on a link, or undefined when the link takes none. Defaults to the `cancel` message. */
+  encodeCancel?: (id: string, link: L) => string | undefined;
 }
 
 interface Pending<L> {
@@ -60,7 +62,9 @@ export function parseExtensionMessage(raw: string | ArrayBuffer): ExtensionToHub
 }
 
 export const encodeCall = (id: string, r: CallRequest): string =>
-  JSON.stringify({ type: 'call', id, tool: r.tool, args: r.args, agent: r.agent } satisfies HubToExtension);
+  JSON.stringify({ type: 'call', id, tool: r.tool, args: r.args, agent: r.agent, timeoutMs: r.timeoutMs } satisfies HubToExtension);
+
+export const encodeCancel = (id: string): string => JSON.stringify({ type: 'cancel', id } satisfies HubToExtension);
 
 export class Relay<L extends RelayLink> {
   private pending = new Map<string, Pending<L>>();
@@ -102,7 +106,10 @@ export class Relay<L extends RelayLink> {
     const req: CallRequest = { tool, args, agent, timeoutMs, safeToRepeat };
     return new Promise<CallResult>((resolve) => {
       const timer = setTimeout(() => {
+        const p = this.pending.get(id);
         this.pending.delete(id);
+        // Tell the browser to give up too, or the call keeps holding its tab's queue (and any lock) there.
+        if (p) this.cancel(id, p.link);
         resolve(errorResult(`The browser did not finish "${tool}" within ${Math.round(timeoutMs / 1000)}s. Take a snapshot to see the current state.`));
       }, timeoutMs);
       this.pending.set(id, { link, req, retryable: safeToRepeat, resolve, timer });
@@ -120,6 +127,15 @@ export class Relay<L extends RelayLink> {
       link.send((this.opts.encode ?? encodeCall)(id, p.req, link));
     } catch {
       this.lost(link, 'dropped');
+    }
+  }
+
+  private cancel(id: string, link: L): void {
+    try {
+      const raw = (this.opts.encodeCancel ?? encodeCancel)(id, link);
+      if (raw !== undefined) link.send(raw);
+    } catch {
+      /* the link is gone; the browser drops its calls on its own deadline */
     }
   }
 

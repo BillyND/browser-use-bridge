@@ -2,7 +2,7 @@
 
 import type { RuntimeMessage } from '../messages';
 import { detach, detachAll, installCdpListeners } from './cdp';
-import { cloud, local, onToolCall, setLocalMode } from './connection';
+import { cloud, local, onCallCancelled, onToolCall, setLocalMode } from './connection';
 import { handleFrameIdentified } from './frames';
 import type { ToolContent } from '../../../shared/protocol';
 import { answer, pendingPrompts } from './policy/approvals';
@@ -12,6 +12,7 @@ import { DEFAULT_AGENT } from './tools/agent-id';
 import { clearAgentStops, stopAgent } from './tools/agent-stop';
 import { agentsReady, lastOwnerOf, nameOf, tabsOf } from './tools/agents';
 import { hideAgentBar, runTool, showAgentBar } from './tools';
+import { TrustedError } from './tools/types';
 
 const KEEPALIVE_ALARM = 'keepalive';
 
@@ -25,9 +26,16 @@ installCdpListeners();
 // Calls arrive from the cloud and the local server alike and run concurrently;
 // runTool serialises what must not interleave (mouse and keyboard input) per agent.
 
+/** Calls running now, by relay call id, so the relay can cancel one it stopped waiting for. */
+const running = new Map<string, AbortController>();
+
+onCallCancelled((id) => running.get(id)?.abort(new TrustedError('The relay stopped waiting for this call, so Helmsman gave up on it.')));
+
 onToolCall(async (msg, endpoint) => {
   const started = Date.now();
-  const result = await runTool(msg.tool, msg.args, msg.agent);
+  const cancel = new AbortController();
+  running.set(msg.id, cancel);
+  const result = await runTool(msg.tool, msg.args, msg.agent, { timeoutMs: msg.timeoutMs, signal: cancel.signal }).finally(() => running.delete(msg.id));
   endpoint.send({ type: 'result', id: msg.id, content: result.content, isError: result.isError });
   await logActivity({
     t: started,

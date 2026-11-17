@@ -12,7 +12,7 @@ export interface ToolCtx {
   agent: string;
   /** Tab the call was scheduled on (tab-scoped tools only). */
   tabId: number;
-  /** Aborted when the user presses Stop; captured when the call started. */
+  /** Aborted when the user presses Stop (captured when the call started), or when the call is given up on (deadline, relay cancel). */
   signal: AbortSignal;
   /** What the safety layer learned about this call, for the audit log. */
   audit: Pick<ActivityEntry, 'host' | 'outcome' | 'approval'>;
@@ -51,5 +51,7 @@ export const isMac = navigator.userAgent.includes('Mac');
 /** Throws when the user pressed Stop; call between steps of long operations. */
 export function checkAbort(ctx: Pick<ToolCtx, 'signal'>) {
   if (state.paused) throw new ToolError(PAUSED);
+  // A call given up on (deadline, cancelled by the relay) carries its own reason; Stop carries none.
+  if (ctx.signal.aborted && ctx.signal.reason instanceof ToolError) throw ctx.signal.reason;
   if (justStopped() || ctx.signal.aborted) throw new ToolError(STOPPED);
 }

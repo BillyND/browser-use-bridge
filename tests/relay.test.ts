@@ -77,6 +77,39 @@ describe('Relay', () => {
     expect(text(r)).toContain('did not finish "browser_wait_for" within 3s');
   });
 
+  it('sends the timeout with the call and cancels the call in the browser when it times out', async () => {
+    const link = new FakeLink();
+    const { relay } = setup(link);
+    const p = relay.call('browser_tabs', { action: 'close', tabId: 7 }, 3000, false, 'local:a');
+    await vi.advanceTimersByTimeAsync(0);
+    const { id } = link.sent[0];
+    expect(link.sent[0]).toMatchObject({ type: 'call', timeoutMs: 3000 });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect((await p).isError).toBe(true);
+    expect(link.sent[1]).toEqual({ type: 'cancel', id });
+    // A late result for the cancelled call is ignored.
+    relay.receive({ type: 'result', id, content: [{ type: 'text', text: 'late' }] });
+    expect(link.sent).toHaveLength(2);
+  });
+
+  it('does not cancel a call that finished in time, and skips links that take no cancel', async () => {
+    const link = new FakeLink();
+    const { relay } = setup(link);
+    const p = relay.call('t', {}, 3000);
+    await vi.advanceTimersByTimeAsync(0);
+    relay.receive({ type: 'result', id: link.sent[0].id, content: [] });
+    await p;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(link.sent.map((m) => m.type)).toEqual(['call']);
+
+    const peer = new FakeLink();
+    const quiet = new Relay<FakeLink>({ current: () => peer, notConnected: NOT_CONNECTED, encodeCancel: () => undefined });
+    const q = quiet.call('t', {}, 1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((await q).isError).toBe(true);
+    expect(peer.sent.map((m) => m.type)).toEqual(['call']);
+  });
+
   it('fails with the not-connected text after the grace period', async () => {
     const { relay } = setup();
     const p = relay.call('t', {}, 5000);

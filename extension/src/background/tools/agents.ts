@@ -10,7 +10,7 @@ import { setAgentTab } from '../state';
 import { agentLabel, cleanName, pickColor, uniqueLabel } from './agent-id';
 import { forgetAgentStop } from './agent-stop';
 import { Scheduler } from './scheduler';
-import { ToolError } from './types';
+import { ToolError, TrustedError } from './types';
 
 /** How long an agent keeps its tabs without making a call. */
 export const LEASE_MS = 10 * 60_000;
@@ -49,12 +49,22 @@ const lastSaved = new Map<string, number>();
 /** Calls each agent has running now: an agent waiting on a long call (the user's help, an approval) keeps its tabs. */
 const inFlight = new Map<string, number>();
 
-// Choosing a tab for an agent must not interleave with another agent doing the same.
+// Choosing a tab for an agent must not interleave with another agent doing the same. The lock is
+// given up after CLAIM_LOCK_TIMEOUT_MS so a Chrome call that never answers under it (a tab stuck
+// closing, a frozen renderer) cannot block every agent's tab choice forever.
 const claims = new Scheduler(1);
-export const withClaimLock = <T>(fn: () => Promise<T>): Promise<T> => claims.run('claim', async () => {
-  await loaded;
-  return fn();
-});
+const CLAIM_LOCK_TIMEOUT_MS = 20_000;
+export const withClaimLock = <T>(fn: () => Promise<T>): Promise<T> => {
+  const deadline = new AbortController();
+  const timer = setTimeout(
+    () => deadline.abort(new TrustedError('Chrome did not answer while Helmsman was choosing or closing a tab (it may be busy or a page may be frozen). Try again in a moment.')),
+    CLAIM_LOCK_TIMEOUT_MS,
+  );
+  return claims.run('claim', async () => {
+    await loaded;
+    return fn();
+  }, undefined, deadline.signal).finally(() => clearTimeout(timer));
+};
 
 const isLive = (agent: string, now = Date.now()) => (inFlight.get(agent) ?? 0) > 0 || now - (store.lastSeen[agent] ?? 0) < LEASE_MS;
 const liveOthers = (agent: string) => Object.keys(store.lastSeen).filter((a) => a !== agent && isLive(a));

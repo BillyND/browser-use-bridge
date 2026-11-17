@@ -1,12 +1,46 @@
 // browser_tabs: list, open, select and close tabs. Every agent works in its own tab group.
 
+import { attach, send, sessionOf } from '../cdp';
 import { assertNotHeld, defaultTabOf, nameOf, ownerLabel, rename, withClaimLock } from './agents';
 import { claimTab, openAgentTab, pageHeader, waitForLoad } from './tab';
-import { freeTool, text, ToolError } from './types';
+import { freeTool, text, ToolError, TrustedError } from './types';
 
 async function bringToFront(tab: chrome.tabs.Tab) {
   await chrome.tabs.update(tab.id!, { active: true });
   if (tab.windowId !== undefined) await chrome.windows.update(tab.windowId, { focused: true });
+}
+
+/** True when `p` settles within `ms` (its error is rethrown), false when it is still pending. */
+async function settlesWithin(p: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), ms)));
+  const settled = p.then(() => true);
+  settled.catch(() => {}); // a rejection after the wait ended is not an unhandled one
+  try {
+    return await Promise.race([settled, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const CLOSE_WAIT_MS = 4000;
+
+/**
+ * Closes a tab without hanging. A page with a beforeunload handler makes Chrome ask "Leave site?" and
+ * chrome.tabs.remove waits for that answer, possibly forever; a frozen page never answers at all.
+ * Closing was asked for, so a "Leave site?" dialog is accepted; anything else ends in a clear error.
+ */
+async function closeTab(tabId: number): Promise<void> {
+  const removed = chrome.tabs.remove(tabId);
+  if (await settlesWithin(removed, 1000)) return;
+  // Still open: look for the dialog (attaching enables the Page domain that reports it).
+  await settlesWithin(attach(tabId), 3000).catch(() => false);
+  if (sessionOf(tabId)?.dialog) await settlesWithin(send(tabId, 'Page.handleJavaScriptDialog', { accept: true }), 2000).catch(() => false);
+  if (await settlesWithin(removed, CLOSE_WAIT_MS)) return;
+  const dialog = sessionOf(tabId)?.dialog;
+  // The dialog text comes from the page, so that error is not a trusted one.
+  if (dialog) throw new ToolError(`Tab ${tabId} did not close: it shows a ${dialog.type} dialog ("${dialog.message}"). Answer it with browser_handle_dialog, then close the tab again.`);
+  throw new TrustedError(`Tab ${tabId} did not close: the page is not responding. Check it with browser_tabs "list"; Chrome may close it later on its own.`);
 }
 
 async function groupTitles(): Promise<Map<number, string>> {
@@ -43,7 +77,7 @@ export const tabsTools = {
       // Checked and closed under the claim lock, so the tab cannot change hands in between.
       await withClaimLock(async () => {
         assertNotHeld(ctx.agent, args.tabId);
-        await chrome.tabs.remove(args.tabId);
+        await closeTab(args.tabId);
       });
       return text(`Closed tab ${args.tabId}.`);
     }
