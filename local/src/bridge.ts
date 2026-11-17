@@ -10,7 +10,7 @@ import http from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
 import { PING, PROTOCOL } from '../../shared/protocol';
-import { type CallResult, type CallRequest, encodeCall, parseExtensionMessage, Relay, type RelayLink } from '../../shared/relay';
+import { type CallResult, type CallRequest, encodeCall, encodeCancel, parseExtensionMessage, Relay, type RelayLink } from '../../shared/relay';
 
 /** A link calls go out on: the extension itself (hub) or the hub process (peer). */
 interface Wire extends RelayLink {
@@ -57,6 +57,8 @@ export function startBridge({ port, extensionId, log }: BridgeOptions): Bridge {
       link.peer
         ? JSON.stringify({ ...req, type: 'relay', id, timeoutMs: Math.max(1000, req.timeoutMs - PEER_SLACK_MS) } satisfies PeerCall)
         : encodeCall(id, req),
+    // A peer's calls run through the hub's relay, which times out first and cancels them in the browser itself.
+    encodeCancel: (id, link) => (link.peer ? undefined : encodeCancel(id)),
   });
 
   // ---- hub role --------------------------------------------------------------

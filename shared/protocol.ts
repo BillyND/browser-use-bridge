@@ -5,7 +5,18 @@ export type ToolContent =
   | { type: 'image'; data: string; mimeType: string };
 
 export type HubToExtension =
-  | { type: 'call'; id: string; tool: string; args: Record<string, unknown>; /** Which AI client issued the call, e.g. "local:claude-code". */ agent?: string }
+  | {
+      type: 'call';
+      id: string;
+      tool: string;
+      args: Record<string, unknown>;
+      /** Which AI client issued the call, e.g. "local:claude-code". */
+      agent?: string;
+      /** How long the relay waits for the result; the extension gives up on the call shortly before. */
+      timeoutMs?: number;
+    }
+  /** The relay stopped waiting for call `id`: the extension aborts it and frees its queue slot. */
+  | { type: 'cancel'; id: string }
   | { type: 'hello' };
 
 export type ExtensionToHub =

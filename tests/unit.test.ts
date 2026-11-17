@@ -215,6 +215,58 @@ describe('scheduler', () => {
     expect(log).toEqual(['start running', 'start theirs']);
   });
 
+  it('gives up on a never-settling task when its signal fires, freeing its lane and slot', async () => {
+    const s = new Scheduler(1);
+    const deadline = new AbortController();
+    const stuck = s.run('agent:a', () => new Promise(() => {}), 'a', deadline.signal);
+    const next = s.run('agent:a', async () => 'list');
+    const otherLane = s.run('agent:b', async () => 'other');
+    await tick();
+    expect(s.stats).toEqual({ running: 1, queued: 2 });
+    deadline.abort(new Error('too slow'));
+    await expect(stuck).rejects.toThrow('too slow');
+    await expect(next).resolves.toBe('list');
+    await expect(otherLane).resolves.toBe('other');
+    expect(s.stats).toEqual({ running: 0, queued: 0 });
+  });
+
+  it('ignores a given-up task that settles later and does not free its slot twice', async () => {
+    const log: string[] = [];
+    const s = new Scheduler(1);
+    const late = controlled(log, 'late');
+    const cancel = new AbortController();
+    const pLate = s.run('tab:1', late.task, 'a', cancel.signal).catch((e: Error) => e.message);
+    await tick();
+    cancel.abort(new Error('cancelled'));
+    expect(await pLate).toBe('cancelled');
+    const blocker = controlled(log, 'blocker');
+    const pBlocker = s.run('tab:1', blocker.task);
+    const pAfter = s.run('tab:2', async () => 'after');
+    await tick();
+    late.finish(); // the abandoned task finishes while the blocker holds the only slot
+    await tick();
+    expect(s.stats).toEqual({ running: 1, queued: 1 });
+    blocker.finish();
+    await expect(pBlocker).resolves.toBe('blocker');
+    await expect(pAfter).resolves.toBe('after');
+    expect(s.stats).toEqual({ running: 0, queued: 0 });
+  });
+
+  it('drops a queued task whose signal fires, and refuses one whose signal already fired', async () => {
+    const log: string[] = [];
+    const s = new Scheduler(6);
+    const first = controlled(log, 'first');
+    const pFirst = s.run('tab:1', first.task);
+    const cancel = new AbortController();
+    const pQueued = s.run('tab:1', controlled(log, 'queued').task, 'a', cancel.signal).catch((e: Error) => e.message);
+    cancel.abort(new Error('cancelled'));
+    expect(await pQueued).toBe('cancelled');
+    await expect(s.run('tab:2', async () => 'x', 'a', cancel.signal)).rejects.toThrow('cancelled');
+    first.finish();
+    await expect(pFirst).resolves.toBe('first');
+    expect(log).toEqual(['start first']);
+  });
+
   it('serializes a burst of tasks per lane while lanes overlap', async () => {
     const s = new Scheduler(6);
     const active = new Map<string, number>();

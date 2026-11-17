@@ -54,6 +54,12 @@ export function onToolCall(handler: (msg: CallMessage, endpoint: Endpoint) => vo
   local.onToolCall((msg) => handler(msg, local));
 }
 
+/** Either relay gave up waiting for a call (call ids are unique across both). */
+export function onCallCancelled(handler: (id: string) => void) {
+  cloud.onCallCancelled(handler);
+  local.onCallCancelled(handler);
+}
+
 export async function setLocalMode(enabled: boolean) {
   await setLocalEnabled(enabled);
   if (enabled) await local.reconnectNow();

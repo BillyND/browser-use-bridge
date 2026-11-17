@@ -36,12 +36,18 @@ export class Endpoint {
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private failures = 0;
   private onCall: ((msg: CallMessage) => void) | null = null;
+  private onCancel: ((id: string) => void) | null = null;
 
   constructor(private cfg: EndpointConfig) {}
 
   /** Handler for calls arriving on this endpoint; answer with this endpoint's `send`. */
   onToolCall(handler: (msg: CallMessage) => void) {
     this.onCall = handler;
+  }
+
+  /** Handler for "the relay stopped waiting for call `id`". */
+  onCallCancelled(handler: (id: string) => void) {
+    this.onCancel = handler;
   }
 
   isConnected(): boolean {
@@ -113,6 +119,7 @@ export class Endpoint {
         return;
       }
       if (msg.type === 'call') this.onCall?.(msg);
+      else if (msg.type === 'cancel') this.onCancel?.(msg.id);
     };
 
     socket.onclose = (event) => {
