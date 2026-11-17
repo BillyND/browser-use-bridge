@@ -14,7 +14,8 @@ import { startFixtures } from './fixtures/server.mjs';
 import { autoApprove } from './support/prompts';
 
 const GATEWAY = `http://localhost:${process.env.E2E_PORT ?? 8787}`;
-const LOCAL_PORT = Number(process.env.HELMSMAN_PORT ?? 47821);
+/** The port the --dev extension dials (see pack-extension.mjs): never the user's real 47821. */
+const LOCAL_PORT = Number(process.env.HELMSMAN_PORT ?? 47921);
 /** The protocol tests use their own server so they never touch the port Chromium's extension is dialling. */
 const PROTO_PORT = LOCAL_PORT + 1;
 const DEVICE = 'e2e-local-device';

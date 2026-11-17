@@ -14,6 +14,8 @@ export interface ToolCtx {
   tabId: number;
   /** Aborted when the user presses Stop (captured when the call started), or when the call is given up on (deadline, relay cancel). */
   signal: AbortSignal;
+  /** Fires only when the call is given up on (deadline, relay cancel), not on Stop. */
+  giveUp?: AbortSignal;
   /** What the safety layer learned about this call, for the audit log. */
   audit: Pick<ActivityEntry, 'host' | 'outcome' | 'approval'>;
   /** Statements by Helmsman itself (not page content) added to the result outside the untrusted envelope. */
