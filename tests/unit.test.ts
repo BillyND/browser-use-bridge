@@ -3,6 +3,7 @@ import { macCommands, parseShortcut } from '../extension/src/background/keys';
 import { agentName } from '../extension/src/prompt-copy';
 import { agentLabel, cleanName, GROUP_COLORS, LABEL_MAX, pickColor, uniqueLabel } from '../extension/src/background/tools/agent-id';
 import { localAgentId } from '../shared/local-agent-id';
+import { downloadFileName } from '../extension/src/background/tools/download-file-name';
 import { Scheduler } from '../extension/src/background/tools/scheduler';
 import { signDeviceToken, verifyDeviceToken } from '../worker/src/device-token';
 import { newCode, normalizeCode } from '../worker/src/pairing';
@@ -230,6 +231,23 @@ describe('scheduler', () => {
     expect(overlapInLane).toBe(false);
     expect(maxTotal).toBeGreaterThan(1);
     expect(maxTotal).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('saved file names', () => {
+  it('keeps subfolders inside Downloads and forces the real extension', () => {
+    expect(downloadFileName('jira/ABC-123 evidence.png', 'screenshot', '.jpg')).toBe('jira/ABC-123 evidence.jpg');
+    expect(downloadFileName('shot', 'screenshot', '.jpg')).toBe('shot.jpg');
+    expect(downloadFileName(undefined, 'page', '.pdf')).toBe('page.pdf');
+    expect(downloadFileName('report.pdf', 'page', '.pdf')).toBe('report.pdf');
+  });
+
+  it('never leaves the Downloads folder or uses invalid characters', () => {
+    expect(downloadFileName('../../etc/passwd', 'screenshot', '.jpg')).toBe('etc/passwd.jpg');
+    expect(downloadFileName('/abs\\win\\a:b?.jpg', 'screenshot', '.jpg')).toBe('abs/win/a_b_.jpg');
+    expect(downloadFileName('folder/', 'screenshot', '.jpg')).toBe('folder.jpg');
+    expect(downloadFileName('.hidden', 'screenshot', '.jpg')).toBe('hidden.jpg');
+    expect(downloadFileName('..', 'screenshot', '.jpg')).toBe('screenshot.jpg');
   });
 });
 

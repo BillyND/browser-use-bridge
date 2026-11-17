@@ -3,6 +3,7 @@
 import type { ToolContent } from '../../../../shared/protocol';
 import { send } from '../cdp';
 import { withSecretsMasked } from '../secrets/mask';
+import { downloadFileName } from './download-file-name';
 import { downloadUrl } from './downloads';
 import { elementBox, locate } from './locate';
 import { withOverlayConcealed } from './overlay';
@@ -99,7 +100,12 @@ export const captureTools = {
       const vp = (await send<any>(tabId, 'Page.getLayoutMetrics')).cssLayoutViewport;
       return [image, `Viewport ${Math.round(vp.clientWidth)}x${Math.round(vp.clientHeight)} px; image pixel (x,y) = browser_mouse_xy x,y (no ref).`];
     }));
-    return [{ type: 'text', text: `${await pageHeader(tab)}\n${note}` }, image];
+    let saved = '';
+    if (args.filename !== undefined && image.type === 'image') {
+      const file = downloadFileName(args.filename, 'screenshot', '.jpg');
+      saved = `\nSaved the screenshot: ${await downloadUrl(`data:image/jpeg;base64,${image.data}`, file)}`;
+    }
+    return [{ type: 'text', text: `${await pageHeader(tab)}\n${note}${saved}` }, image];
   }),
 
   browser_pdf: tabTool(async (args, ctx) => {
@@ -121,8 +127,7 @@ export const captureTools = {
       if (bytes > 8 * 1024 * 1024) throw new ToolError(`The PDF is ${(bytes / 1048576).toFixed(1)} MB; too large to return inline. Omit returnBase64 to save it to Downloads.`);
       return text(`${header}\nPDF (${bytes} bytes), base64:\n${pdf.data}`);
     }
-    const name = String(args.filename ?? 'page.pdf').replace(/[\\/:*?"<>|]/g, '_');
-    const saved = await downloadUrl(`data:application/pdf;base64,${pdf.data}`, name.endsWith('.pdf') ? name : `${name}.pdf`);
+    const saved = await downloadUrl(`data:application/pdf;base64,${pdf.data}`, downloadFileName(args.filename, 'page', '.pdf'));
     return text(`${header}\nSaved the page as PDF (${Math.round(bytes / 1024)} KB): ${saved}`);
   }),
 };

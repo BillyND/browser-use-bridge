@@ -246,10 +246,11 @@ export const TOOLS: ToolDef[] = [
     name: 'browser_screenshot',
     title: 'Screenshot',
     description:
-      'Capture the visible viewport, the full page, or one element (by ref). Viewport screenshots use 1 image pixel = 1 CSS pixel, so coordinates read off the image can be passed straight to browser_mouse_xy.',
+      'Capture the visible viewport, the full page, or one element (by ref). Viewport screenshots use 1 image pixel = 1 CSS pixel, so coordinates read off the image can be passed straight to browser_mouse_xy. Pass filename to also save the image as a JPEG file (e.g. evidence to attach to a ticket): the result gives its absolute path on disk.',
     inputSchema: obj({
       ref: { ...ref, description: 'Capture only this element.' },
       fullPage: { type: 'boolean', default: false },
+      filename: { type: 'string', description: 'Also save the screenshot as a file in the Downloads folder under this name, e.g. "jira/ABC-123-login.jpg" (subfolders are created; the extension is always .jpg). The result gives the absolute path.' },
       tabId,
     }),
     readOnly: true,
