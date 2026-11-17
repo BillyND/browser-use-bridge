@@ -56,9 +56,9 @@ Cloud and local can be used at the same time.
 | Tabs and navigation | `browser_tabs`, `browser_navigate`, `browser_windows` |
 | Reading | `browser_snapshot` (accessibility tree with stable refs across all frames; full, diff, scoped or interactive-only), `browser_read_more`, `browser_get_text`, `browser_find`, `browser_extract` (links, tables, forms, headings) |
 | Acting | `browser_click`, `browser_hover`, `browser_type`, `browser_fill_form`, `browser_select_option`, `browser_press_key`, `browser_scroll`, `browser_drag`, `browser_mouse_xy` (canvas apps), `browser_select_text`, `browser_clipboard` |
-| Files and media | `browser_file_upload`, `browser_download`, `browser_screenshot` (CSS-pixel coordinates), `browser_pdf` |
+| Files and media | `browser_file_upload`, `browser_download`, `browser_screenshot` (CSS-pixel coordinates; `filename` also saves a JPEG to Downloads and returns its path, e.g. to attach to a ticket), `browser_pdf` |
 | Page state | `browser_wait_for` (text, selector, network idle), `browser_handle_dialog`, `browser_evaluate`, `browser_emulate` (device, color scheme, network), `browser_cookies`, `browser_history`, `browser_console_messages`, `browser_network_requests` |
-| Human in the loop | `browser_request_user` (hand over for login or CAPTCHA), `browser_done` (the agent ends its session: cursor, bar and Chrome's debugging bar go away at once) |
+| Human in the loop | `browser_request_user` (last resort: a picture CAPTCHA, a code sent to the user's phone), `browser_done` (the agent ends its session: cursor, bar and Chrome's debugging bar go away at once) |
 | Power features | `browser_secrets_list` (vault: the model types `{{secret:NAME}}` and never sees the value), `browser_workflow` (record and replay, also exposed as MCP prompts) |
 
 How it works:
@@ -74,8 +74,11 @@ How it works:
 
 Everything is enforced in the extension, so it applies to every MCP client.
 
-- **Full browser access:** the connected AI can navigate, read, click, type, upload and download across websites without permission-mode prompts.
-- **Human handback:** `browser_request_user` remains available when a person must log in, solve a CAPTCHA or complete another step themselves.
+- **Full browser access:** the connected AI can navigate, read, click, type, upload and download across websites without permission-mode prompts. Agents are told to finish tasks themselves:
+  - logging in with credentials from chat or the secret vault;
+  - ticking CAPTCHA checkboxes.
+- **No Chrome permission prompts:** for the sites an agent opens, Chrome's own prompts that are still on "ask" are answered automatically. Multiple downloads, clipboard and location are allowed; notifications, camera and microphone are blocked. A choice you already made for a site is never changed.
+- **Human handback, last resort:** `browser_request_user` is for steps only a person can do, such as a picture CAPTCHA, a code sent to your phone or a hardware key.
 - **Technical upload limit:** files over 25 MB are rejected.
 
 - **Prompt-injection hardening:** page content is wrapped as untrusted and hidden text is stripped.

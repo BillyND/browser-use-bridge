@@ -356,6 +356,17 @@ test.describe('new tools', () => {
     expect(fs.readFileSync(saved!).subarray(0, 5).toString()).toBe('%PDF-');
   });
 
+  test('browser_screenshot can also save the image to a file and returns its path', async () => {
+    const r = await call('browser_screenshot', { filename: 'jira/ABC-123 evidence.png' }, T);
+    expect(r.isError, r.text).toBeFalsy();
+    expect(r.text).toContain('Saved the screenshot: Downloaded to');
+    const saved = /Downloaded to (.+)\.\s*$/m.exec(r.text)?.[1];
+    expect(saved, r.text).toBeTruthy();
+    const bytes = fs.readFileSync(saved!);
+    expect([bytes[0], bytes[1]]).toEqual([0xff, 0xd8]); // a JPEG
+    expect(bytes.length).toBeGreaterThan(1000);
+  });
+
   test('browser_emulate changes one tab and resets', async () => {
     const probe = "JSON.stringify([screen.width, matchMedia('(pointer: coarse)').matches, navigator.userAgent.includes('iPhone'), matchMedia('(prefers-color-scheme: dark)').matches, navigator.onLine])";
     const normal = JSON.parse(JSON.parse(await evalIn(T, tab, probe)));

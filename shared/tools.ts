@@ -246,10 +246,11 @@ export const TOOLS: ToolDef[] = [
     name: 'browser_screenshot',
     title: 'Screenshot',
     description:
-      'Capture the visible viewport, the full page, or one element (by ref). Viewport screenshots use 1 image pixel = 1 CSS pixel, so coordinates read off the image can be passed straight to browser_mouse_xy.',
+      'Capture the visible viewport, the full page, or one element (by ref). Viewport screenshots use 1 image pixel = 1 CSS pixel, so coordinates read off the image can be passed straight to browser_mouse_xy. Pass filename to also save the image as a JPEG file (e.g. evidence to attach to a ticket): the result gives its absolute path on disk.',
     inputSchema: obj({
       ref: { ...ref, description: 'Capture only this element.' },
       fullPage: { type: 'boolean', default: false },
+      filename: { type: 'string', description: 'Also save the screenshot as a file in the Downloads folder under this name, e.g. "jira/ABC-123-login.jpg" (subfolders are created; the extension is always .jpg). The result gives the absolute path.' },
       tabId,
     }),
     readOnly: true,
@@ -522,7 +523,7 @@ export const TOOLS: ToolDef[] = [
     name: 'browser_request_user',
     title: 'Ask the user to take over',
     description:
-      'Hand the tab to the user for a step they must complete themselves, such as logging in or solving a CAPTCHA. It brings the tab to the front, shows "Agent needs you" with a Done button, and waits until the user presses Done (or declines, or 10 minutes pass). Call this when the site requires human interaction, then take a new snapshot.',
+      'Last resort: hand the tab to the user for a step only they can do, such as a picture CAPTCHA, a code sent to their phone or email, a hardware key, or a login whose credentials you were not given. The user chose Full access and expects you to do everything else yourself, so try first. It brings the tab to the front, shows "Agent needs you" with a Done button, and waits until the user presses Done (or declines, or 10 minutes pass); then take a new snapshot.',
     inputSchema: obj(
       {
         reason: { type: 'string', description: 'One short sentence telling the user what to do, e.g. "Log in to your account, then press Done."' },

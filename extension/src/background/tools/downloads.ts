@@ -6,7 +6,8 @@ const MAX_BYTES = 25 * 1024 * 1024;
 
 /** Downloads `url` into the user's Downloads folder (with the browser's cookies) and reports where it landed. */
 export async function downloadUrl(url: string, filename?: string): Promise<string> {
-  const id = await chrome.downloads.download({ url, filename, conflictAction: 'uniquify' });
+  // saveAs false: never open Chrome's "Save as" dialog, so a task does not stall on it.
+  const id = await chrome.downloads.download({ url, filename, conflictAction: 'uniquify', saveAs: false });
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     const [item] = await chrome.downloads.search({ id });

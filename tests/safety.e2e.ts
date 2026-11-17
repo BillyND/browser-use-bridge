@@ -191,6 +191,32 @@ test.describe("untrusted page content", () => {
   });
 });
 
+test("Chrome's permission prompts are answered for sites agents open, keeping the user's own choices", async () => {
+  // A site the user already decided about: notifications allowed on purpose.
+  const site = `http://127.0.0.1:${new URL(SITE_A).port}`;
+  const settingsOf = () =>
+    h.sw.evaluate(async (url) => {
+      const names = ["automaticDownloads", "clipboard", "location", "notifications", "camera", "microphone"] as const;
+      const out: Record<string, string> = {};
+      for (const n of names) out[n] = (await chrome.contentSettings[n].get({ primaryUrl: url })).setting as string;
+      return out;
+    }, `${site}/index.html`);
+  await h.sw.evaluate((pattern) => chrome.contentSettings.notifications.set({ primaryPattern: pattern, setting: "allow" }), `${site}/*`);
+  expect((await settingsOf()).automaticDownloads).toBe("ask");
+
+  const r = await open("/index.html", "127.0.0.1");
+  expect(r.isError, r.text).toBeFalsy();
+  await expect.poll(async () => (await settingsOf()).automaticDownloads).toBe("allow");
+  expect(await settingsOf()).toEqual({
+    automaticDownloads: "allow",
+    clipboard: "allow",
+    location: "allow",
+    notifications: "allow", // the user's own choice stays
+    camera: "block",
+    microphone: "block",
+  });
+});
+
 test.describe("hand-back for login and CAPTCHA", () => {
   test("a page with a visible password field tells the model to call browser_request_user", async () => {
     const r = await open("/login.html");

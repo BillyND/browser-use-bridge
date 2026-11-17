@@ -17,6 +17,7 @@ import { workflowTools } from '../workflows/tools';
 import { DEFAULT_AGENT } from './agent-id';
 import { agentJustStopped, agentSignal } from './agent-stop';
 import { beginCall } from './agents';
+import { answerSitePermissionPrompts } from '../site-permission-prompts-auto-answer';
 import { browserDataTools } from './browser-data';
 import { captureTools } from './capture';
 import { devtoolsLogTools } from './devtools-logs';
@@ -125,6 +126,8 @@ async function execute(
     if (spec.scope === 'tab') {
       const tab = await resolveTab(agent, input.tabId);
       ctx.tabId = tab.id!;
+      // A tab the agent just took over may already be on a site that will ask for permissions.
+      void answerSitePermissionPrompts(tab.url ?? '');
       lane = `tab:${tab.id}`;
     }
     const content = await scheduler.run(lane, async () => {
