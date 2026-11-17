@@ -42,10 +42,11 @@ export const TOOLS: ToolDef[] = [
     name: 'browser_tabs',
     title: 'Tabs',
     description:
-      'List, open, close or select tabs. Each AI agent has its own default tab and its own Chrome tab group, so several agents can work side by side. "new" opens a tab of your own (in the background); "select" makes an existing tab your default. Pass tabId to other tools to work in several tabs in parallel. Start a task by listing tabs unless the user named a URL.',
+      'List, open, close or select tabs, and name your tab group. Each AI agent has its own default tab and its own Chrome tab group, so several agents can work side by side. On your first call pass name: a short title for your task (e.g. "Checkout bug"), shown on your tab group so the user can tell agents apart; "rename" changes it later. "new" opens a tab of your own (in the background); "select" makes an existing tab your default. Tabs another agent is working in are refused. Pass tabId to other tools to work in several tabs in parallel. Start a task by listing tabs unless the user named a URL.',
     inputSchema: obj(
       {
-        action: { type: 'string', enum: ['list', 'new', 'close', 'select'] },
+        action: { type: 'string', enum: ['list', 'new', 'close', 'select', 'rename'] },
+        name: { type: 'string', maxLength: 60, description: 'Title of your tab group: a few words naming your task, in the user\'s language (e.g. "Checkout bug"), at most 24 characters (longer is cut). Accepted with any action; required for "rename". A name another agent already uses gets a "·2" suffix.' },
         tabId: { type: 'integer', description: 'Required for close and select.' },
         url: { type: 'string', description: 'URL to open with "new".' },
         activate: { type: 'boolean', default: false, description: 'With "new" or "select": also bring the tab to the front of the browser (off by default so other agents and the user are not disturbed).' },

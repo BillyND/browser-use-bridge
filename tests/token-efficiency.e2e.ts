@@ -111,10 +111,12 @@ test.describe('snapshot diffing', () => {
   test('each agent and each tab keeps its own baseline', async () => {
     await home();
     await snapshotOf();
-    // Another agent has not seen this tab yet: asking for a diff gives it the full snapshot.
+    // Another agent has not seen this page yet: asking for a diff gives it the full snapshot. It works
+    // in a tab of its own, since a tab another agent is working in is refused.
     const tabs = await call('browser_tabs', { action: 'list' });
-    const tabId = Number(/\[(\d+)\] Fixture Home/.exec(tabs.text)?.[1]);
-    const other = await call('browser_snapshot', { mode: 'diff', tabId }, 'other-agent');
+    const url = /\] Fixture Home — (\S+)/.exec(tabs.text)![1];
+    await call('browser_tabs', { action: 'new', url }, 'other-agent');
+    const other = await call('browser_snapshot', { mode: 'diff' }, 'other-agent');
     expect(other.text).toContain('no earlier snapshot');
     const mine = await snapshotOf({ mode: 'diff' });
     expect(mine.text).toContain('Snapshot diff');

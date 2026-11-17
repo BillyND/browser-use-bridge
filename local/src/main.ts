@@ -2,6 +2,9 @@
 // reaches the Chrome extension over a WebSocket on 127.0.0.1 (see bridge.ts).
 
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { randomUUID } from 'node:crypto';
+import os from 'node:os';
+import { localAgentId } from '../../shared/local-agent-id';
 import { toolsServerFactory } from '../../shared/mcp-tools-server';
 import { DEFAULT_LOCAL_PORT } from '../../shared/protocol';
 import { parseProfile } from '../../shared/tools';
@@ -17,10 +20,15 @@ if (process.stdin.isTTY) {
 
 const bridge = startBridge({ port, extensionId: process.env.HELMSMAN_EXTENSION_ID, log });
 
+// Each client session spawns its own server process, so the process is the agent: two Claude Code
+// sessions sharing one MCP config get separate tabs and tab groups. The working folder (the
+// client's project) is the group title until the agent names its group itself.
+const instance = randomUUID().slice(0, 8);
+const agentId = () => localAgentId(server.server.getClientVersion()?.name ?? 'local', process.cwd(), os.homedir(), instance);
+
 // HELMSMAN_PROFILE=core advertises only the most-used tools (smaller tool list); anything else means full.
 const server = toolsServerFactory()(
-  (tool, args, timeoutMs, safeToRepeat) =>
-    bridge.call(tool, args, timeoutMs, safeToRepeat, `local:${server.server.getClientVersion()?.name ?? 'local'}`),
+  (tool, args, timeoutMs, safeToRepeat) => bridge.call(tool, args, timeoutMs, safeToRepeat, agentId()),
   parseProfile(process.env.HELMSMAN_PROFILE),
 );
 

@@ -2,7 +2,7 @@
 // client would, speaking MCP over stdio), the extension in real Chromium, and
 // the cloud gateway at the same time.
 
-import { chromium, expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, expect, test, type BrowserContext, type Page, type Worker } from '@playwright/test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -101,7 +101,7 @@ test.describe('local server protocol', () => {
     // Called from the process that owns the port...
     const own = a.call('browser_tabs', { action: 'list' });
     const msgA = await ext.next();
-    expect(msgA).toMatchObject({ type: 'call', tool: 'browser_tabs', args: { action: 'list' }, agent: 'local:proto-a' });
+    expect(msgA).toMatchObject({ type: 'call', tool: 'browser_tabs', args: { action: 'list' }, agent: expect.stringMatching(/^local:proto-a\/[^#/]+#[0-9a-f]{8}$/) });
     const big = 'x'.repeat(900);
     const raw = JSON.stringify({ type: 'result', id: msgA.id, content: [{ type: 'text', text: big }] });
     const third = Math.ceil(raw.length / 3);
@@ -111,7 +111,9 @@ test.describe('local server protocol', () => {
     // ...and from a second process, which shares the same extension connection.
     const peer = b.call('browser_snapshot');
     const msgB = await ext.next();
-    expect(msgB).toMatchObject({ type: 'call', tool: 'browser_snapshot', agent: 'local:proto-b' });
+    expect(msgB).toMatchObject({ type: 'call', tool: 'browser_snapshot', agent: expect.stringMatching(/^local:proto-b\/[^#/]+#[0-9a-f]{8}$/) });
+    // Two processes are two agents, even when the client and folder are the same.
+    expect(String(msgB.agent).split('#')[1]).not.toBe(String(msgA.agent).split('#')[1]);
     ext.send({ type: 'result', id: msgB.id, content: [{ type: 'text', text: 'from peer' }], isError: false });
     expect((await peer).text).toBe('from peer');
     ext.ws.close();
@@ -148,11 +150,12 @@ test.describe('local mode in Chromium', () => {
   let fixtures: { url: string; close: () => Promise<unknown> };
   let popup: Page;
   let extOrigin: string;
+  let sw: Worker;
   let stopApprover: () => void = () => {};
   const clients: StdioMcpClient[] = [];
   const cloud = (name: string, args: Record<string, unknown> = {}) => cloudCall(GATEWAY, DEVICE, name, args);
-  const client = (name: string) => {
-    const c = new StdioMcpClient(name, LOCAL_PORT);
+  const client = (name: string, cwd?: string) => {
+    const c = new StdioMcpClient(name, LOCAL_PORT, undefined, cwd);
     clients.push(c);
     return c;
   };
@@ -167,7 +170,7 @@ test.describe('local mode in Chromium', () => {
       args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--window-size=1280,800'],
       viewport: null,
     });
-    let [sw] = ctx.serviceWorkers();
+    [sw] = ctx.serviceWorkers();
     sw ??= await ctx.waitForEvent('serviceworker');
     extOrigin = new URL(sw.url()).host;
     stopApprover = autoApprove(ctx, sw);
@@ -223,26 +226,71 @@ test.describe('local mode in Chromium', () => {
     expect(r.text).toContain('Đã gửi: local@vidu.vn');
   });
 
-  test('two local clients work at the same time through one extension connection', async () => {
+  test('two local clients work at the same time, each in its own tab and group, and cannot take each other\'s tab', async () => {
     const [a] = clients;
-    const b = client('e2e-b');
-    await b.initialize();
-    // Each client gets its own default tab; B is pointed at A's tab to share the page.
+    const b = client('e2e-b'); // same client folder as a: a second session in one project
+    const other = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cma-e2e-')), 'shop-admin');
+    fs.mkdirSync(other);
+    const c = client('e2e-c', other); // a session in another project
+    await Promise.all([b.initialize(), c.initialize()]);
     const sa = await a.call('browser_snapshot');
     expect(sa.isError, sa.text).toBeFalsy();
-    const tabId = Number(/Tab (\d+)/.exec(sa.text)![1]);
-    const [, sb] = await Promise.all([a.call('browser_snapshot'), b.call('browser_snapshot', { tabId })]);
-    expect(sb.isError, sb.text).toBeFalsy();
-    expect(sb.text).toContain('Trang thử nghiệm');
-    // B acts, A sees the effect.
-    const r = await b.call('browser_click', { ref: refOf(sb.text, 'Tăng', 'button'), tabId });
-    expect(r.text).toContain('Đếm: 2');
-    expect((await a.call('browser_snapshot')).text).toContain('Đếm: 2');
+    const tabA = Number(/Tab (\d+)/.exec(sa.text)![1]);
+
+    // A tab another session is working in is refused, whatever the call.
+    const ref = refOf(sa.text, 'Tăng', 'button');
+    for (const r of await Promise.all([
+      b.call('browser_click', { ref, tabId: tabA }),
+      b.call('browser_tabs', { action: 'select', tabId: tabA }),
+      b.call('browser_tabs', { action: 'close', tabId: tabA }),
+    ])) {
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain(`Tab ${tabA} belongs to another agent`);
+    }
+
+    // Each session opens its own tab; b names its group after its task, c keeps its folder name.
+    const [nb, nc] = await Promise.all([
+      b.call('browser_tabs', { action: 'new', url: fixtures.url, name: 'Đối soát đơn' }),
+      c.call('browser_tabs', { action: 'new', url: fixtures.url }),
+    ]);
+    expect(nb.text).toContain('Your tab group is named "Đối soát đơn"');
+    const tabB = Number(/Opened tab (\d+)/.exec(nb.text)![1]);
+    const tabC = Number(/Opened tab (\d+)/.exec(nc.text)![1]);
+    expect(new Set([tabA, tabB, tabC]).size).toBe(3);
+
+    // All three click in parallel, each only in its own page.
+    const refB = refOf((await b.call('browser_snapshot')).text, 'Tăng', 'button');
+    const refC = refOf((await c.call('browser_snapshot', { tabId: tabC })).text, 'Tăng', 'button');
+    const before = Number(/Đếm: (\d+)/.exec((await a.call('browser_get_text')).text)![1]);
+    const results = await Promise.all([
+      a.call('browser_click', { ref }),
+      a.call('browser_click', { ref }),
+      b.call('browser_click', { ref: refB }),
+      c.call('browser_click', { ref: refC, tabId: tabC }),
+    ]);
+    for (const r of results) expect(r.isError, r.text).toBeFalsy();
+    expect((await a.call('browser_get_text')).text).toContain(`Đếm: ${before + 2}`);
+    expect((await b.call('browser_get_text')).text).toContain('Đếm: 1');
+    expect((await c.call('browser_get_text', { tabId: tabC })).text).toContain('Đếm: 1');
+
+    // Chrome shows one group per session: a's folder, the name b chose, c's folder.
+    const titles = await sw.evaluate(async (ids) => {
+      const out: Record<number, string | undefined> = {};
+      for (const id of ids) {
+        const t = await chrome.tabs.get(id);
+        out[id] = t.groupId === -1 ? undefined : (await chrome.tabGroups.get(t.groupId)).title;
+      }
+      return out;
+    }, [tabA, tabB, tabC]);
+    expect(titles[tabA]).toBe(path.basename(process.cwd()));
+    expect(titles[tabB]).toBe('Đối soát đơn');
+    expect(titles[tabC]).toBe('shop-admin');
+    await c.close();
+    clients.splice(clients.indexOf(c), 1);
   });
 
   test('the extension serves the cloud and the local server at once, each call answered on its own endpoint', async () => {
     const token = await (await fetch(`${GATEWAY}/dev/token?device=${DEVICE}`)).text();
-    const [sw] = ctx.serviceWorkers();
     await sw.evaluate((t) => chrome.storage.local.set({ account: { token: t, code: 'E2E00-00000' } }), token);
     await popup.evaluate(() => chrome.runtime.sendMessage({ type: 'reconnect' }));
     await expect.poll(async () => (await cloud('browser_tabs', { action: 'list' })).isError ?? false, { timeout: 30_000 }).toBe(false);

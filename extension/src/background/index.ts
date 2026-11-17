@@ -1,14 +1,16 @@
 // Service worker entry: wires the connection, tool execution, popup and login.
 
 import type { RuntimeMessage } from '../messages';
-import { detachAll, installCdpListeners } from './cdp';
+import { detach, detachAll, installCdpListeners } from './cdp';
 import { cloud, local, onToolCall, setLocalMode } from './connection';
 import { handleFrameIdentified } from './frames';
 import type { ToolContent } from '../../../shared/protocol';
 import { answer, pendingPrompts } from './policy/approvals';
 import { OPEN_TAG } from './policy/untrusted';
 import { GATEWAY_URL, clearActivity, getAccount, getAgentTab, logActivity, notify, popupState, setAccount, setPaused, setStatus, state } from './state';
-import { agentLabel, DEFAULT_AGENT } from './tools/agent-id';
+import { DEFAULT_AGENT } from './tools/agent-id';
+import { clearAgentStops, stopAgent } from './tools/agent-stop';
+import { agentsReady, lastOwnerOf, nameOf, tabsOf } from './tools/agents';
 import { hideAgentBar, runTool, showAgentBar } from './tools';
 
 const KEEPALIVE_ALARM = 'keepalive';
@@ -32,7 +34,7 @@ onToolCall(async (msg, endpoint) => {
     tool: msg.tool,
     summary: summaryOf(result.content),
     ok: !result.isError,
-    agent: agentLabel(msg.agent ?? DEFAULT_AGENT),
+    agent: nameOf(msg.agent ?? DEFAULT_AGENT),
     ...result.audit,
   });
 });
@@ -73,8 +75,24 @@ async function register(password = ''): Promise<void> {
 /** Window after Stop during which new calls are refused, so the agent drops its queued steps. */
 const STOP_GRACE_MS = 8_000;
 
-/** On-page Stop: cancel what is running and end this task, without turning the agent off. */
-async function stop() {
+/**
+ * On-page Stop: cancel what is running and end this task, without turning the agent off.
+ * Pressed on a tab an agent holds, it stops only that agent so the others keep working.
+ */
+async function stop(pressedOn?: number) {
+  // The Stop message can be what wakes the service worker: read who owns the tab before deciding.
+  await agentsReady;
+  // The agent whose bar the tab shows, even if it has been idle past its lease.
+  const agent = pressedOn === undefined ? undefined : lastOwnerOf(pressedOn);
+  if (agent) {
+    stopAgent(agent, STOP_GRACE_MS);
+    for (const tab of await tabsOf(agent)) {
+      await hideAgentBar(tab).catch(() => {});
+      await detach(tab).catch(() => {});
+    }
+    notify();
+    return;
+  }
   state.stoppedUntil = Date.now() + STOP_GRACE_MS;
   state.abort.abort();
   state.abort = new AbortController();
@@ -97,6 +115,7 @@ async function pause() {
 
 async function resume() {
   state.stoppedUntil = 0;
+  clearAgentStops();
   await setPaused(false);
   const tabId = await getAgentTab();
   if (tabId !== undefined) await showAgentBar(tabId, 'Sẵn sàng').catch(() => {});
@@ -137,7 +156,7 @@ chrome.runtime.onMessage.addListener((msg: RuntimeMessage, _sender, sendResponse
       })();
       return false;
     case 'stop':
-      void stop();
+      void stop(_sender.tab?.id);
       return false;
     case 'pause':
       void pause();

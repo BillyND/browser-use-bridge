@@ -4,7 +4,7 @@
 import { ask } from '../policy/approvals';
 import { getSettings } from '../policy/store';
 import { hostOf } from '../policy/site-rules';
-import { agentLabel } from './agent-id';
+import { nameOf } from './agents';
 import { afterAction } from './page-summary';
 import { prepareTab } from './tab';
 import { tabTool, ToolError, TrustedError } from './types';
@@ -22,7 +22,7 @@ export const handbackTools = {
     await bringToFront(tab);
     const settings = await getSettings();
     const choice = await ask(
-      { tabId: tab.id!, kind: 'handback', agent: agentLabel(ctx.agent), host: hostOf(tab.url ?? ''), label: reason },
+      { tabId: tab.id!, kind: 'handback', agent: nameOf(ctx.agent), host: hostOf(tab.url ?? ''), label: reason },
       ctx.signal,
       settings.handbackTimeoutMs,
     );

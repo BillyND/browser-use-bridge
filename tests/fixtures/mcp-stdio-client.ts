@@ -22,8 +22,10 @@ export class StdioMcpClient {
     readonly name: string,
     port: number,
     bundle = path.resolve('local/helmsman-mcp.mjs'),
+    /** Working folder of the server, like the project folder an AI client is started in. */
+    cwd?: string,
   ) {
-    this.child = spawn(process.execPath, [bundle], { env: { ...process.env, HELMSMAN_PORT: String(port) }, stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child = spawn(process.execPath, [bundle], { cwd, env: { ...process.env, HELMSMAN_PORT: String(port) }, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child.stderr!.on('data', (d) => (this.stderr += d));
     this.child.stdout!.on('data', (d) => {
       this.buffer += d;

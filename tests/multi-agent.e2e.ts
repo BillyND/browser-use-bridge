@@ -201,6 +201,67 @@ test('Stop aborts running and queued calls on every tab, then work resumes', asy
   await popup.close();
 });
 
+test('an agent cannot act on, select or close a tab another agent is working in', async () => {
+  const refused = await Promise.all([
+    call('browser_evaluate', { script: 'location.search', tabId: tabA }, B),
+    call('browser_tabs', { action: 'select', tabId: tabA }, B),
+    call('browser_tabs', { action: 'close', tabId: tabA }, B),
+  ]);
+  for (const r of refused) {
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain(`Tab ${tabA} belongs to another agent (tab group "${A}")`);
+    expect(r.text).toContain('browser_tabs action "new"');
+  }
+  // Nothing changed hands: the tab is still open, still A's, and B still works in its own.
+  expect(await evalIn(A, tabA, 'location.search')).toContain('?a');
+  expect((await call('browser_evaluate', { script: 'location.search' }, B)).text).toContain('?b');
+  expect((await call('browser_tabs', { action: 'list' }, B)).text).toContain(`[${tabA}]`);
+});
+
+test('agents name their own tab groups, and a name already in use gets a suffix', async () => {
+  const named = await call('browser_tabs', { action: 'list', name: 'Checkout bug' }, A);
+  expect(named.text).toContain('Your tab group is named "Checkout bug"');
+  expect(named.text).toContain('Your tab group: "Checkout bug"');
+  const same = await call('browser_tabs', { action: 'rename', name: 'Checkout bug' }, B);
+  expect(same.text).toContain('"Checkout bug·2"');
+  const groups = await groupsInChrome();
+  expect(groups.find((g) => g.title === 'Checkout bug')?.tabs).toContain(tabA);
+  expect(groups.find((g) => g.title === 'Checkout bug·2')?.tabs).toContain(tabB);
+  // Results and other agents' listings use the new names.
+  expect((await call('browser_snapshot', {}, A)).text).toContain(`Tab ${tabA} (Checkout bug)`);
+  expect((await call('browser_tabs', { action: 'list' }, B)).text).toContain('used by Checkout bug');
+  expect((await call('browser_tabs', { action: 'rename' }, A)).isError).toBe(true);
+  // Back to the ids, so later tests keep recognising the groups.
+  await call('browser_tabs', { action: 'rename', name: A }, A);
+  await call('browser_tabs', { action: 'rename', name: B }, B);
+});
+
+test('Stop pressed on one agent\'s tab stops that agent only', async () => {
+  const runningA = call('browser_wait_for', { text: 'never-on-this-page', timeout: 45 }, A);
+  const runningB = call('browser_wait_for', { text: 'never-on-this-page', timeout: 4 }, B);
+  await sleep(800);
+  // The on-page Stop button sends this from the tab's content-script world, like here.
+  await h.sw.evaluate(async (tabId) => {
+    await chrome.scripting.executeScript({ target: { tabId }, func: () => void chrome.runtime.sendMessage({ type: 'stop' }) });
+  }, tabA);
+  const ra = await runningA;
+  expect(ra.isError).toBe(true);
+  expect(ra.text).toContain('pressed Stop');
+  // B was not stopped: its wait ran to its own timeout, and it keeps working right away.
+  const rb = await runningB;
+  expect(rb.text).not.toContain('pressed Stop');
+  const sb = await call('browser_snapshot', {}, B);
+  expect(sb.isError, sb.text).toBeFalsy();
+  // A's lined-up steps are dropped during the grace window, then A works again after "resume".
+  expect((await call('browser_snapshot', {}, A)).text).toContain('pressed Stop');
+  const popup = await stopControls();
+  await popup.resume();
+  await sleep(300);
+  const again = await call('browser_snapshot', {}, A);
+  expect(again.isError, again.text).toBeFalsy();
+  await popup.close();
+});
+
 test.describe('new tools', () => {
   const T = 'tools-agent';
   let tab: number;
@@ -277,8 +338,8 @@ test.describe('new tools', () => {
     expect(r.isError, r.text).toBeFalsy();
     expect(await evalIn(T, tab, "document.getElementById('paste-target').value")).toBe('"Câu cần chọn"');
     expect((await call('browser_clipboard', { action: 'read' }, T)).text).toContain('Câu cần chọn');
-    // Another agent's clipboard is separate.
-    expect((await call('browser_clipboard', { action: 'read', tabId: tab }, 'agent-other')).text).toContain('holds 0 character(s)');
+    // Another agent's clipboard is separate (it reads it in a tab of its own: this one is T's).
+    expect((await call('browser_clipboard', { action: 'read' }, 'agent-other')).text).toContain('holds 0 character(s)');
     r = await call('browser_select_text', { text: 'không-có-chuỗi-này' }, T);
     expect(r.isError).toBe(true);
   });

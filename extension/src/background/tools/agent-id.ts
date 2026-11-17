@@ -6,17 +6,45 @@ export type GroupColor = (typeof GROUP_COLORS)[number];
 
 export const DEFAULT_AGENT = 'default';
 
-const clip = (s: string) => s.trim().slice(0, 14) || 'agent';
+/** Longest group title Helmsman sets; Chrome shows more but the tab strip gets crowded. */
+export const LABEL_MAX = 24;
+
+const clip = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, LABEL_MAX).trim() || 'agent';
 
 /**
- * Ids look like `local:claude-code` (local server), `ChatGPT#<client id>` (cloud gateway) or an
- * arbitrary string; the label is the part a person recognises.
+ * The label an agent has until it names itself. Ids look like
+ * `local:claude-code/sbb-dev#1a2b3c4d` (local server: client, working folder, process),
+ * `local:claude-code` (older local servers), `ChatGPT#<client id>` (cloud gateway) or an
+ * arbitrary string; the label is the part a person recognises: the folder when there is one.
  */
 export function agentLabel(agent: string): string {
   if (agent === DEFAULT_AGENT) return 'AI';
-  if (agent.startsWith('local:')) return clip(agent.slice(6));
-  const hash = agent.indexOf('#');
-  return clip(hash > 0 ? agent.slice(0, hash) : agent);
+  let rest = agent.startsWith('local:') ? agent.slice(6) : agent;
+  const hash = rest.indexOf('#');
+  if (hash > 0) rest = rest.slice(0, hash);
+  const slash = rest.lastIndexOf('/');
+  return clip(slash >= 0 && slash < rest.length - 1 ? rest.slice(slash + 1) : rest);
+}
+
+/**
+ * Cleans a group name an agent chose for itself; empty when nothing usable is left. Other agents see
+ * it in tab listings and refusals, so control characters, quotes and angle brackets are dropped.
+ */
+export function cleanName(name: unknown): string {
+  if (typeof name !== 'string') return '';
+  const s = name.replace(/[\u0000-\u001f\u007f"<>`]/g, ' ').replace(/\s+/g, ' ').trim();
+  // The "·N" suffix is Helmsman's, so a chosen name cannot fake one (checked after clipping too).
+  return s ? clip(clip(s).replace(/·\d+$/, '')) : '';
+}
+
+/** `base`, or `base·2`, `base·3`… so the label differs from every label in `taken`. */
+export function uniqueLabel(base: string, taken: readonly string[]): string {
+  if (!taken.includes(base)) return base;
+  for (let n = 2; ; n++) {
+    const suffix = `·${n}`;
+    const label = `${base.slice(0, LABEL_MAX - suffix.length).trim()}${suffix}`;
+    if (!taken.includes(label)) return label;
+  }
 }
 
 function hash(s: string): number {

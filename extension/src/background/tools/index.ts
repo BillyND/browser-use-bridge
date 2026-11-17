@@ -15,6 +15,8 @@ import { pausedLoaded, state } from '../state';
 import { beginStep } from '../workflows/recorder';
 import { workflowTools } from '../workflows/tools';
 import { DEFAULT_AGENT } from './agent-id';
+import { agentJustStopped, agentSignal } from './agent-stop';
+import { beginCall } from './agents';
 import { browserDataTools } from './browser-data';
 import { captureTools } from './capture';
 import { devtoolsLogTools } from './devtools-logs';
@@ -102,13 +104,19 @@ async function execute(
 ): Promise<Executed> {
   await pausedLoaded;
   if (state.paused) return failure(PAUSED);
-  if (justStopped()) return failure(STOPPED);
+  if (justStopped() || agentJustStopped(agent)) return failure(STOPPED);
   const spec = TOOLS[name];
   if (!spec) return failure(`Unknown tool ${name}.`);
-  // Pressing Stop drops every call still waiting its turn; the running ones notice at their next step.
-  const signal = state.abort.signal;
-  const onStop = () => scheduler.cancelPending(new ToolError(STOPPED));
-  signal.addEventListener('abort', onStop, { once: true });
+  const endCall = await beginCall(agent);
+  // Pressing Stop drops the calls still waiting their turn (every agent's, or only the stopped
+  // agent's); the running ones notice at their next step.
+  const everyone = state.abort.signal;
+  const mine = agentSignal(agent);
+  const signal = AbortSignal.any([everyone, mine]);
+  const onStopAll = () => scheduler.cancelPending(new ToolError(STOPPED));
+  const onStopMine = () => scheduler.cancelPending(new ToolError(STOPPED), agent);
+  everyone.addEventListener('abort', onStopAll, { once: true });
+  mine.addEventListener('abort', onStopMine, { once: true });
   const ctx: ToolCtx = { agent, tabId: -1, signal, audit: {}, notes: [] };
   try {
     const input = (args ?? {}) as Args;
@@ -121,19 +129,21 @@ async function execute(
     }
     const content = await scheduler.run(lane, async () => {
       if (state.paused) throw new ToolError(PAUSED);
-      if (signal.aborted) throw new ToolError(STOPPED);
+      if (signal.aborted || agentJustStopped(agent)) throw new ToolError(STOPPED);
       if (spec.scope === 'tab') setRunningAgent(ctx.tabId, agent);
       const recorded = record ? await beginStep(agent, name, input, ctx) : undefined;
       const result = await spec.run(input, ctx);
       recorded?.();
       return finish(ctx, name, result);
-    });
+    }, agent);
     // Helmsman's own bookkeeping (secret names, the workflow list) is machine-read JSON, not page content.
     const own = name === 'browser_secrets_list' || (name === 'browser_workflow' && input.action !== 'run');
     return { content, audit: { outcome: 'ok', ...ctx.audit }, seal: !own, notes: ctx.notes };
   } catch (e) {
     return failure(failureText(e), ctx.audit);
   } finally {
-    signal.removeEventListener('abort', onStop);
+    endCall();
+    everyone.removeEventListener('abort', onStopAll);
+    mine.removeEventListener('abort', onStopMine);
   }
 }
