@@ -18,8 +18,9 @@ export function looksLikeCaptcha(src: string, title = ''): boolean {
   return /recaptcha|hcaptcha|turnstile|challenges\.cloudflare\.com|captcha-delivery|funcaptcha|arkoselabs/i.test(`${src} ${title}`);
 }
 
+/** Full access: a CAPTCHA checkbox is the agent's to click; only a picture or puzzle challenge goes to the user. */
 export const HANDBACK_HINT =
-  'Helmsman notice: this page asks for a login or a CAPTCHA. Do not type credentials or try to solve it yourself: call browser_request_user with a short reason so the user can do it, then continue with a new snapshot.';
+  'Helmsman notice: this page shows a CAPTCHA. Click its checkbox yourself (e.g. "I\'m not a robot") and take a new snapshot. Only if a picture or puzzle challenge appears, call browser_request_user with a short reason, then continue with a new snapshot.';
 
 /** Full access: the user wants no questions, so a login is filled from the saved secrets instead of handed back. */
 export const FULL_ACCESS_LOGIN_HINT =
