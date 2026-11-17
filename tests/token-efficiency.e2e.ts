@@ -256,7 +256,7 @@ test.describe('tool profiles', () => {
   });
 
   test('local: HELMSMAN_PROFILE=core advertises the short list', async () => {
-    const port = Number(process.env.HELMSMAN_PORT ?? 47821) + 3;
+    const port = Number(process.env.HELMSMAN_PORT ?? 47921) + 3;
     process.env.HELMSMAN_PROFILE = 'core';
     const core = new StdioMcpClient('profile-core', port);
     delete process.env.HELMSMAN_PROFILE;

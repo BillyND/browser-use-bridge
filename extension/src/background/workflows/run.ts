@@ -8,7 +8,7 @@ import { resolveLocator } from './locate';
 import type { Step, Workflow } from './store';
 
 /** Runs one tool call the way an agent's call runs, but never records it. */
-export type StepRunner = (tool: string, args: Args, agent: string) => Promise<{ content: ToolContent[]; isError?: boolean }>;
+export type StepRunner = (tool: string, args: Args, agent: string, giveUp?: AbortSignal) => Promise<{ content: ToolContent[]; isError?: boolean }>;
 
 const firstText = (content: ToolContent[]) => content.find((c) => c.type === 'text')?.text ?? '';
 
@@ -26,7 +26,8 @@ async function runStep(step: Step, values: Record<string, string>, agent: string
     const tabId = (await resolveTab(agent)).id!;
     concrete = (await resolveLocators(args, (loc) => resolveLocator(tabId, loc, ctx))) as Args;
   }
-  const result = await run(step.tool, concrete, agent);
+  // A step gives up when the whole run does, so a stuck step cannot keep holding its tab.
+  const result = await run(step.tool, concrete, agent, ctx.giveUp);
   if (result.isError) throw new ToolError(firstText(result.content));
   return result.content;
 }

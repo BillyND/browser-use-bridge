@@ -6,12 +6,13 @@ import { cloud, local, onCallCancelled, onToolCall, setLocalMode } from './conne
 import { handleFrameIdentified } from './frames';
 import type { ToolContent } from '../../../shared/protocol';
 import { answer, pendingPrompts } from './policy/approvals';
+import { failureText } from './policy/guard';
 import { OPEN_TAG } from './policy/untrusted';
 import { GATEWAY_URL, clearActivity, getAccount, getAgentTab, logActivity, notify, popupState, setAccount, setPaused, setStatus, state } from './state';
 import { DEFAULT_AGENT } from './tools/agent-id';
 import { clearAgentStops, stopAgent } from './tools/agent-stop';
 import { agentsReady, lastOwnerOf, nameOf, tabsOf } from './tools/agents';
-import { hideAgentBar, runTool, showAgentBar } from './tools';
+import { hideAgentBar, runTool, showAgentBar, type ToolResult } from './tools';
 import { TrustedError } from './tools/types';
 
 const KEEPALIVE_ALARM = 'keepalive';
@@ -35,7 +36,15 @@ onToolCall(async (msg, endpoint) => {
   const started = Date.now();
   const cancel = new AbortController();
   running.set(msg.id, cancel);
-  const result = await runTool(msg.tool, msg.args, msg.agent, { timeoutMs: msg.timeoutMs, signal: cancel.signal }).finally(() => running.delete(msg.id));
+  // Every call gets an answer, even if something below fails in a way the tool code did not expect;
+  // otherwise the agent waits for the relay's full timeout.
+  const result = await runTool(msg.tool, msg.args, msg.agent, { timeoutMs: msg.timeoutMs, signal: cancel.signal })
+    .catch((e: unknown): ToolResult => ({
+      content: [{ type: 'text', text: `Helmsman hit an internal error while running "${msg.tool}"; try again.\n${failureText(e)}` }],
+      isError: true,
+      audit: { outcome: 'error' },
+    }))
+    .finally(() => running.delete(msg.id));
   endpoint.send({ type: 'result', id: msg.id, content: result.content, isError: result.isError });
   await logActivity({
     t: started,

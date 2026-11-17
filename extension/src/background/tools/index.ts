@@ -64,7 +64,7 @@ const TOOLS: Record<string, ToolSpec> = {
   ...secretsTools,
   ...sessionTools,
   // Replays call tools like any agent would, but must not be recorded as steps themselves.
-  ...workflowTools((tool, args, agent) => execute(tool, args, agent, false)),
+  ...workflowTools((tool, args, agent, giveUp) => execute(tool, args, agent, false, { signal: giveUp })),
 };
 
 export const TOOL_NAMES = Object.keys(TOOLS);
@@ -148,7 +148,7 @@ async function execute(
   const onStopMine = () => scheduler.cancelPending(new ToolError(STOPPED), agent);
   everyone.addEventListener('abort', onStopAll, { once: true });
   mine.addEventListener('abort', onStopMine, { once: true });
-  const ctx: ToolCtx = { agent, tabId: -1, signal, audit: {}, notes: [] };
+  const ctx: ToolCtx = { agent, tabId: -1, signal, giveUp: call.signal, audit: {}, notes: [] };
   try {
     const input = (args ?? {}) as Args;
     assertSecretsAllowed(name, input);

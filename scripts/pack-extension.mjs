@@ -1,6 +1,6 @@
 // Builds the extension into extension/unpacked and packs extension/browser-use-bridge.zip.
 // Usage: [HELMSMAN_PORT=47821] node scripts/pack-extension.mjs [--dev] [--gateway https://...]
-//   HELMSMAN_PORT  port of the local MCP server the extension's "Local mode" connects to
+//   HELMSMAN_PORT  port of the local MCP server the extension's "Local mode" connects to (default 47821; 47921 with --dev)
 //   --dev      points at http://localhost:$E2E_PORT (default 8787; used by the e2e tests)
 //   --gateway  overrides the gateway origin; defaults to PUBLIC_URL in worker/wrangler.jsonc
 
@@ -26,7 +26,9 @@ function gatewayFromWrangler() {
   return m?.[1];
 }
 
-const localPort = Number(process.env.HELMSMAN_PORT ?? 47821);
+// Dev (e2e) builds dial their own port by default, so a test Chrome never joins the user's real local
+// server on 47821 and takes over their live Chrome's connection.
+const localPort = Number(process.env.HELMSMAN_PORT ?? (argv.includes('--dev') ? 47921 : 47821));
 const gateway = (argv.includes('--dev') ? `http://localhost:${process.env.E2E_PORT ?? 8787}` : flag('--gateway') ?? gatewayFromWrangler() ?? '').replace(/\/$/, '');
 if (!/^https?:\/\//.test(gateway) || gateway.includes('REPLACE')) {
   console.error(`Gateway URL is not set (got "${gateway}"). Deploy the worker first or pass --gateway https://...`);
